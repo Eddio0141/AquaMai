@@ -377,3 +377,4 @@ AquaMai/BuildInfo.g.cs
 .sisyphus
 .omo
 *.lscache
+/.direnv

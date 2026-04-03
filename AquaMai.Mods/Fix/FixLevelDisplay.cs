@@ -27,14 +27,6 @@ public class FixLevelDisplay
         GameObject ____difficultyUtageQuesionMarkDoubleDigit)
     {
         // 在 KLD 表门和里门不应用修改
-        if (Shim.IsKaleidxScopeMode)
-        {
-            if (Shim.KaleidxScopeGateId is 8 or 10)
-            {
-                return;
-            }
-        }
-
         switch (levelID)
         {
             case > MusicLevelID.Level9P:

@@ -43,7 +43,6 @@ public class DontRuinMyAccount
     {
         if (!(Enabled && !ignoreScore && GameManager.IsInGame)) return;
         // 对8号和10号门，永不启用防毁号（它们中用到了autoplay功能来模拟特殊谱面效果）
-        if (GameManager.IsKaleidxScopeMode && (Shim.KaleidxScopeGateId is 8 or 10)) return;
         ignoreScore = true;
         MelonLogger.Msg("[DontRuinMyAccount] Triggered. Will ignore this score.");
     }
