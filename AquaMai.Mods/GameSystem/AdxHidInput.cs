@@ -27,27 +27,49 @@ namespace AquaMai.Mods.GameSystem;
     zh: "使用 ADX / NPRO 的自定义输入（没有 ADX / NPRO 的话开了也不会加载，也没有坏处）")]
 public class AdxHidInput
 {
+    private const int NoronDxVid = 0x2E3C;
+    private const int NoronDx1PProductId = 0x5751;
+    private const int NoronDx2PProductId = 0x5752;
+    private const int NoronDxReportLength = 8;
+    private const ulong TouchMask = (1UL << 34) - 1;
+
+    private static readonly int[] buttonBitMap = [5, 4, 3, 2, 9, 8, 7, 6];
     private static HidDevice[] adxController = new HidDevice[2];
     private static byte[][] readBuffer = [null, null];
     private static readonly InputLatch[] inputLatch = [new(), new()];
+    private static readonly InputLatch[] touchLatch = [new(), new()];
     private static double[] td = [0, 0];
     private static bool tdEnabled, keyEnabled, pipeEnabled;
     private static bool[] hidThreadRunning = [false, false];
     private static bool[] connected = [false, false];
+    private static bool[] useNoronDxProtocol = [false, false];
+    private static bool[] touchProviderPending = [false, false];
+    private static bool[] touchProviderRegistered = [false, false];
+    private static bool[] ledBrightnessAdjusted = [false, false];
 
     private static bool TryConnectDevice(int p)
     {
         var device = p == 0
-            ? HidDevices.Enumerate(0x2E3C, [0x5750, 0x5767]).FirstOrDefault(it => !it.DevicePath.EndsWith("kbd"))
-            : HidDevices.Enumerate(0x2E4C, 0x5750).Concat(HidDevices.Enumerate(0x2E3C, 0x5768)).FirstOrDefault(it => !it.DevicePath.EndsWith("kbd"));
+            ? HidDevices.Enumerate(NoronDxVid, NoronDx1PProductId)
+                .Concat(HidDevices.Enumerate(0x2E3C, [0x5750, 0x5767]))
+                .FirstOrDefault(it => !it.DevicePath.EndsWith("kbd"))
+            : HidDevices.Enumerate(NoronDxVid, NoronDx2PProductId)
+                .Concat(HidDevices.Enumerate(0x2E4C, 0x5750))
+                .Concat(HidDevices.Enumerate(0x2E3C, 0x5768))
+                .FirstOrDefault(it => !it.DevicePath.EndsWith("kbd"));
 
         if (device == null) return false;
 
         adxController[p] = device;
         device.OpenDevice();
         readBuffer[p] = new byte[device.Capabilities.InputReportByteLength];
+        useNoronDxProtocol[p] = device.Attributes.ProductId is NoronDx1PProductId or NoronDx2PProductId;
         connected[p] = true;
-        MelonLogger.Msg($"[HidInput] Device {p + 1}P connected");
+        if (useNoronDxProtocol[p])
+        {
+            touchProviderPending[p] = true;
+        }
+        MelonLogger.Msg($"[HidInput] Device {p + 1}P connected{(useNoronDxProtocol[p] ? " (NPro)" : "")}");
 
         return true;
     }
@@ -55,6 +77,18 @@ public class AdxHidInput
     private static bool IsDeviceConnected(int p)
     {
         return adxController[p] != null && connected[p];
+    }
+
+    private static void RegisterPendingTouchProviders()
+    {
+        for (int p = 0; p < touchProviderPending.Length; p++)
+        {
+            if (!touchProviderPending[p]) continue;
+            touchProviderPending[p] = false;
+            if (touchProviderRegistered[p]) continue;
+            TouchStatusProvider.RegisterTouchStatusProvider(p, GetTouchState);
+            touchProviderRegistered[p] = true;
+        }
     }
 
     private static void DisconnectDevice(int p)
@@ -76,6 +110,9 @@ public class AdxHidInput
         readBuffer[p] = null;
 
         inputLatch[p].Clear();
+        touchLatch[p].Clear();
+        useNoronDxProtocol[p] = false;
+        touchProviderPending[p] = false;
 
         MelonLogger.Msg($"[HidInput] Device {p + 1}P disconnected");
     }
@@ -122,6 +159,12 @@ public class AdxHidInput
                 continue;
             }
 
+            if (!useNoronDxProtocol[p] && !IsButtonInputEnabled(p))
+            {
+                Thread.Sleep(500);
+                continue;
+            }
+
             var device = adxController[p];
             if (device == null) continue;
 
@@ -129,7 +172,24 @@ public class AdxHidInput
             {
                 var buf = readBuffer[p];
                 if (buf == null) continue;
-                if (!HidRawIO.Read(device, buf, out var bytesRead) || bytesRead <= 13)
+                if (!HidRawIO.Read(device, buf, out var bytesRead))
+                {
+                    DisconnectDevice(p);
+                    if (!RealHotPlugSupport) return;
+                    continue;
+                }
+
+                if (useNoronDxProtocol[p])
+                {
+                    if (!TryProcessNoronDxReport(p, buf, bytesRead))
+                    {
+                        DisconnectDevice(p);
+                        if (!RealHotPlugSupport) return;
+                    }
+                    continue;
+                }
+
+                if (bytesRead <= 13)
                 {
                     DisconnectDevice(p);
                     if (!RealHotPlugSupport) return;
@@ -151,8 +211,49 @@ public class AdxHidInput
         }
     }
 
+    private static bool TryProcessNoronDxReport(int p, byte[] buffer, int bytesRead)
+    {
+        if (bytesRead < NoronDxReportLength) return false;
+
+        var offset = bytesRead >= NoronDxReportLength + 1 && buffer[0] == 0 ? 1 : 0;
+        if (bytesRead < offset + NoronDxReportLength) return false;
+
+        ulong touchState = 0;
+        for (int i = 0; i < 6; i++)
+        {
+            touchState |= (ulong)buffer[offset + i] << (i * 8);
+        }
+        var activeTouchState = touchState & TouchMask;
+        touchLatch[p].Update(activeTouchState);
+
+        ulong buttonState = 0;
+        if (IsButtonInputEnabled(p))
+        {
+            var buttons = buffer[offset + 6];
+            for (int i = 0; i < buttonBitMap.Length; i++)
+            {
+                if ((buttons & (1 << i)) != 0)
+                {
+                    buttonState |= 1UL << buttonBitMap[i];
+                }
+            }
+
+            buttonState |= (ulong)(buffer[offset + 7] & 0x0F) << 10;
+        }
+        inputLatch[p].Update(buttonState);
+        return true;
+    }
+
+    private static ulong GetTouchState(int p)
+    {
+        var touchState = useNoronDxProtocol[p] ? touchLatch[p].ReadBits(TouchMask) : 0;
+        return touchState;
+    }
+
     private static void TdInit(int p)
     {
+        if (useNoronDxProtocol[p]) return;
+
         adxController[p].OpenDevice();
         var arr = new byte[64];
         arr[0] = 71;
@@ -170,13 +271,20 @@ public class AdxHidInput
         }
         if (rpt.Data[5] < 110) return;
         pipeEnabled = true;
-        if (!LedBrightnessControl.shouldEnableImplicitly)
+        if (!ledBrightnessAdjusted[p])
         {
+            ledBrightnessAdjusted[p] = true;
             LedBrightnessControl.shouldEnableImplicitly = true;
-            LedBrightnessControl.button1p *= 0.8f;
-            LedBrightnessControl.button2p *= 0.8f;
-            LedBrightnessControl.cabinet1p *= 0.8f;
-            LedBrightnessControl.cabinet2p *= 0.8f;
+            if(p == 0)
+            {
+                LedBrightnessControl.button1p *= 0.8f;
+                LedBrightnessControl.cabinet1p *= 0.8f;
+            }
+            else
+            {
+                LedBrightnessControl.button2p *= 0.8f;
+                LedBrightnessControl.cabinet2p *= 0.8f;
+            }
         }
         arr[0] = 0x73;
         adxController[p].WriteReportSync(new HidReport(64)
@@ -213,12 +321,13 @@ public class AdxHidInput
 
         for (int i = 0; i < 2; i++)
         {
-            if (i == 0 ? p1DisableButtons : p2DisableButtons) continue;
+            var buttonInputEnabled = IsButtonInputEnabled(i);
+            if (!buttonInputEnabled && !useNoronDxProtocol[i] && !RealHotPlugSupport) continue;
             if (hidThreadRunning[i]) continue;
             if (!RealHotPlugSupport && adxController[i] == null) continue;
             if (!RealHotPlugSupport && !NeedsButtonInput(i)) continue;
 
-            keyEnabled = true;
+            keyEnabled |= buttonInputEnabled;
             hidThreadRunning[i] = true;
             var p = i;
             var hidThread = new Thread(() => HidInputThread(p))
@@ -231,10 +340,18 @@ public class AdxHidInput
 
     public static void OnAfterPatch()
     {
+        RegisterPendingTouchProviders();
         if (!keyEnabled) return;
         JvsSwitchHook.RegisterButtonChecker(IsButtonPushed);
         JvsSwitchHook.RegisterAuxiliaryStateProvider(GetAuxiliaryState);
         JvsSwitchHook.RegisterCustomFnStateProvider(GetCustomFnState);
+    }
+
+    [HarmonyPrefix]
+    [HarmonyPatch(typeof(GameMain), "Update")]
+    public static void PreGameMainUpdate()
+    {
+        RegisterPendingTouchProviders();
     }
 
     private static bool IsButtonPushed(int playerNo, int buttonIndex1To8)
@@ -292,6 +409,11 @@ public class AdxHidInput
     {
         keyMaps[0] = [p1Button1, p1Button2, p1Button3, p1Button4];
         keyMaps[1] = [p2Button1, p2Button2, p2Button3, p2Button4];
+    }
+
+    private static bool IsButtonInputEnabled(int p)
+    {
+        return p == 0 ? !p1DisableButtons : !p2DisableButtons;
     }
 
     private static void ApplyAuxiliaryInput(ref AuxiliaryState state, IOKeyMap keyMap, bool isPushed, int playerNo)
