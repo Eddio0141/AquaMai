@@ -33,7 +33,10 @@ public class CreditConfig
         {
             var stackTrace = new StackTrace();
             var stackFrames = stackTrace.GetFrames();
-            if (stackFrames.Any(f => f.GetMethod() is { DeclaringType: { Name: "TicketSelectMonitor" }, Name: "Initialize" }))
+            if (stackFrames.Any(f => f.GetMethod() is { DeclaringType.Name: "TicketSelectMonitor", Name: "Initialize" }
+                                                   or { DeclaringType.Name: "ModeSelectProcess", Name: "OnStart" }
+                                                   or { DeclaringType.Name: "TicketSelectMonitor", Name: "UpdateOkButtonByTicketStatus" }
+            ))
             {
                 __result = false;
                 return false;
@@ -66,6 +69,18 @@ public class CreditConfig
     public static bool PreCredit(ref uint __result)
     {
         __result = lockCredits;
+        return false;
+    }
+
+    [EnableIf(nameof(allowTicketInFreePlay))]
+    [EnableGameVersion(27000)]
+    [HarmonyPrefix]
+    [HarmonyPatch("Manager.MagicalPassManager", "GetNeedCredit")]
+    public static bool GetNeedCredit(ref int needCredit, ref int needCreditNumerator, ref int needCreditDenominator)
+    {
+        needCredit = 0;
+        needCreditNumerator = 0;
+        needCreditDenominator = 0;
         return false;
     }
 }
