@@ -165,7 +165,7 @@ public class StartupDirectToGame
         GameManager.SelectedDeleteGhostID = GhostManager.GhostTarget.End;
         GameManager.SelectScoreType = GetScoreType(musicId);
         GameManager.MusicTrackNumber = 1;
-        GameManager.SetMaxTrack();
+        Shim.SetMaxTrack();
 
         GameManager.SelectMusicID[0] = musicId;
         GameManager.SelectDifficultyID[0] = _difficulty;

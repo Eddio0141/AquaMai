@@ -40,7 +40,7 @@ public class EntryToMusicSelection
             if (!userDatas.All(it => it.IsGuest())) return true;
         }
         Shim.Set_GameManager_IsNormalMode(true);
-        GameManager.SetMaxTrack();
+        Shim.SetMaxTrack();
         SharedInstances.GameMainObject.StartCoroutine(GraduallyIncreaseHeadphoneVolumeCoroutine());
         ___container.processManager.AddProcess(new MusicSelectProcess(___container));
         ___container.processManager.ReleaseProcess(__instance);

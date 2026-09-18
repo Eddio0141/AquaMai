@@ -1,3 +1,4 @@
+using AquaMai.Core.Helpers;
 using HarmonyLib;
 using MAI2.Util;
 using Manager;
@@ -37,7 +38,7 @@ public class Process : ContinueProcess
                 addCount = (uint)(Singleton<UserDataManager>.Instance.IsSingleUser() ? 3 : 4);
             }
             EarlyContinue.currentAddTrackCount += addCount;
-            GameManager.SetMaxTrack();
+            Shim.SetMaxTrack();
             container.processManager.AddProcess(new NextTrackProcess(container, this), 50);
         }
         else

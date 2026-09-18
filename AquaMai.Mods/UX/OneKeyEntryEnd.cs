@@ -92,7 +92,7 @@ public class OneKeyEntryEnd
 
         if (processToRelease != null)
         {
-            GameManager.SetMaxTrack();
+            Shim.SetMaxTrack();
             // 将 CreditController 移动到副屏
             SharedInstances.ProcessDataContainer.processManager.SendMessage(new Message(ProcessType.CommonProcess, CommonProcess.MessageID_CreditSub));
             SharedInstances.ProcessDataContainer.processManager.AddProcess(new FadeProcess(SharedInstances.ProcessDataContainer, processToRelease,

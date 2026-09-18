@@ -256,4 +256,23 @@ public static class Shim
     private static readonly Func<int> GetKaleidxScopeGateId = GameInfo.GameVersion is >= 25000 and < 26500 ? () => Singleton<KaleidxScopeManager>.Instance.gateId : () => 0;
     public static int KaleidxScopeGateId => GetKaleidxScopeGateId();
     public static bool IsKaleidxScopeMode => IsKaleidxScopeModeGetter();
+
+    public static Action SetMaxTrack = Iife<Action>(() =>
+    {
+        var method = typeof(GameManager).GetMethod("SetMaxTrack", BindingFlags.Static | BindingFlags.Public);
+        object[] parameters;
+        if (method.GetParameters().Length == 0)
+        {
+            parameters = [];
+        }
+        else if (method.GetParameters().Length == 3)
+        {
+            parameters = [false, false, false];
+        }
+        else
+        {
+            throw new Exception("No matching GameManager.SetMaxTrack() method found");
+        }
+        return () => method.Invoke(null, parameters);
+    });
 }
