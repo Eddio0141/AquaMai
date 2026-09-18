@@ -171,4 +171,12 @@ public partial class SinglePlayer
         ____time1.SetVisible(false);
         ____time10.SetVisible(false);
     }
+
+    [EnableGameVersion(27000)]
+    [HarmonyPatch("SubBGController", "SetScreenClipsX")]
+    [HarmonyPrefix]
+    public static bool BGControllerSetScreenClipsX()
+    {
+        return false;
+    }
 }
