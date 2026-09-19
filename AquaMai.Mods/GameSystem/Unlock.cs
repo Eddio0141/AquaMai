@@ -217,15 +217,12 @@ public class Unlock
         }
     }
 
-    // 在乐曲数据初始化后，将所有乐曲标记为"未禁用"
-    // 这样可以确保所有乐曲都可以在选曲界面显示
-    [HarmonyPostfix]
-    [HarmonyPatch(typeof(MusicData), nameof(MusicData.Init))]
-    [EnableIf(nameof(songs))]
-    public static void PostMusicDataInit(MusicData __instance)
+    [HarmonyPrefix]
+    [HarmonyPatch(typeof(Manager.MaiStudio.Serialize.MusicData), nameof(Manager.MaiStudio.Serialize.MusicData.IsDisable))]
+    public static bool PreIsDisable(ref bool __result)
     {
-        // disable 属性为 true 表示乐曲未被禁用（命名有点反直觉）
-        Traverse.Create(__instance).Property<bool>("disable").Value = true;
+        __result = false;
+        return false;
     }
 
     [ConfigEntry(
